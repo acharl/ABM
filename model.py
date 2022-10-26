@@ -29,11 +29,12 @@ class MarketPlace(mesa.Agent):
         def has_capacity(advertisement):
            return advertisement["capacity"] > job["resources"]
             
-        matches = list(filter(has_capacity, self.advertisements))
+        matches = list(filter(has_capacity, self.advertisements)) # TODO the matchin also has to include the pricing? 
         
         if len(matches) > 0: 
             matched_advertisement = min(matches, key=lambda x:x['price_per_cpu_second'])
             matched_processor = self.model.processors[matched_advertisement["id"]]
+
             # remove the matched advertisement from the open advertisements
             self.advertisements[:] = [ad for ad in self.advertisements if ad.get('id') != matched_advertisement['id']] 
             matched_processor.update_reputation()
@@ -84,7 +85,6 @@ class ProcessorAgent(mesa.Agent):
     def update_reputation(self):
         self.reputation += 1
 
-
     def execute_job():
         pass
          
@@ -133,6 +133,8 @@ class ReputationModel(mesa.Model):
 
     def step(self):
         self.schedule.step()
+        # TODO JGD make sure that at each step the matching is performed again
+        # perhaps the processors have to adjust their pricing 
 
         # - match jobs
         # - execute jobs 
