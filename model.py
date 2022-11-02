@@ -32,6 +32,8 @@ class MarketPlace(mesa.Agent):
 
     def match_job(self, job): 
 
+        consumer = self.model.consumers[job["consumer_id"]]
+
         matches = []
         def has_capacity(advertisement):
             return advertisement["capacity"] > job["resources"]
@@ -40,7 +42,7 @@ class MarketPlace(mesa.Agent):
             matched_processor = self.model.processors[advertisement["unique_id"]]
             return matched_processor.reputation > job['min_reputation']
         
-        ads_with_capacity = [ad for ad in list(self.advertisements.values()) if has_capacity(ad)]## list(filter(has_capacity, list(self.advertisements.values()))) # TODO the matchin also has to include the pricing? 
+        ads_with_capacity = [ad for ad in list(self.advertisements.values()) if has_capacity(ad)]# TODO the matchin also has to include the pricing? 
 
         if job['min_reputation']:
             matches = [ad for ad in ads_with_capacity if has_min_reputation(ad)]
@@ -48,21 +50,31 @@ class MarketPlace(mesa.Agent):
             matches = ads_with_capacity
         
         if len(matches) > 0: 
-            matched_advertisement = min(matches, key=lambda x:x['price_per_cpu_second'])
-            matched_processor = self.model.processors[matched_advertisement["unique_id"]]
-            consumer = self.model.consumers[job["consumer_id"]]
+            if hasattr(job, 'slots'): 
+                slots = job['slots']
+                sorted_matches = sorted(matches, key=lambda m: m['price_per_cpu_second'])[:slots]
+                candidates = [self.model.processors[m["unique_id"]] for m in sorted_matches]
+                if (len(candidates) == slots):
+                    for candidate in candidates: 
+                        candidate.process_job(job, self.avg_reward, slots)
+                for advertisement in sorted_matches: 
+                    self.advertisements.pop(advertisement["unique_id"])
+                else: 
+                    return False
+            else: 
 
+                matched_advertisement = min(matches, key=lambda x:x['price_per_cpu_second'])
+                matched_processor = self.model.processors[matched_advertisement["unique_id"]]
 
             # remove the matched advertisement from the open advertisements
-            self.advertisements.pop(matched_advertisement["unique_id"])
+                self.advertisements.pop(matched_advertisement["unique_id"])
+                matched_processor.process_job(job, self.avg_reward)
 
-            matched_processor.process_job(job, self.avg_reward)
             consumer.on_process_job()
-
             self.total_jobs_matched += 1
             self.total_rewards += job['reward']
-            self.avg_reward = self.total_rewards / self.total_jobs_matched # TODO verify
-
+            self.avg_reward = self.total_rewards / self.total_jobs_matched 
+        
             return True
         else: 
             return False
@@ -84,20 +96,21 @@ class ConsumerAgent(mesa.Agent):
         self.has_open_jobs = False
 
     def step(self):
-        # TODO filter for reputation 
         if self.has_open_jobs: 
             pass
         else: 
             job = {}
-            p = random.uniform(0.5, 0.9)
+            min_reputation = random.uniform(0.5, 0.9)
+            slots = random.randint(1, 10)
             job = { 
                 "cpu_seconds": self.cpu_seconds, 
                 "reward": self.reward, 
                 "resources": self.resources, 
-                "min_reputation": p if random.uniform(0, 1) > 0.5 else None,
+                "min_reputation": min_reputation if random.uniform(0, 1) > 0.5 else None,
+                "slots": slots if random.uniform(0, 1) > 2 else None,
                 "consumer_id": self.unique_id
                 }
-            self.model.market_place.register_job(job) # TODO with p = 0.5 a consumer specifies a min reputation 
+            self.model.market_place.register_job(job) 
             self.has_open_jobs = True
         
 
@@ -133,11 +146,13 @@ class ProcessorAgent(mesa.Agent):
 
         self.reputation = self.calculate_reputation()
 
-    def process_job(self, job, avg_reward):
-        # TODO if fulfillment succesfull, with certain p
+    def process_job(self, job, avg_reward, slots = None):
         is_fulfilled = random.uniform(0, 1) < self.success_rate
         if is_fulfilled: 
-            self.income += job['reward']
+            if slots: 
+                self.income += job['reward']/slots
+            else: 
+                self.income += job['reward']
             self.update_reputation(job, avg_reward, is_fulfilled)
         else: 
             self.update_reputation(job, avg_reward, False)
@@ -219,7 +234,7 @@ all_incomes = []
 
 for i in range(1): 
     model = ReputationModel(100, 100)
-    for j in range(100):
+    for j in range(10):
         model.step()
 
         incomes = [processor.get_income() for processor in model.processors.values()]
@@ -245,8 +260,4 @@ plt.title("Students enrolled in different courses")
 plt.hist(all_incomes, bins=range(max(all_incomes) + 1))
 plt.savefig('ABM_plot')
 
-# TODO at each step in the model a certain amount of processors and/or consumers enter the market 
 
-
-# TODO 
-# - make sure that a consumer only registers a job if they don't have one outstanding
