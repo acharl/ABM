@@ -1,7 +1,8 @@
-from functools import total_ordering
 import mesa
 import random
 import matplotlib.pyplot as plt
+import statistics
+import numpy as np 
 
 # This ABM instance should ideally reflect the behaviour of the matching algorithm 
 # as well as the reputation system. 
@@ -16,6 +17,10 @@ class MarketPlace(mesa.Agent):
     avg_reward = 0
     total_rewards = 0
     total_jobs_matched = 0
+
+    total_jobs_fulfilled = 0
+    total_jobs_failed = 0 
+    
 
     jobs_to_be_matched = [] 
     advertisements = {} 
@@ -50,7 +55,7 @@ class MarketPlace(mesa.Agent):
             matches = ads_with_capacity
         
         if len(matches) > 0: 
-            if hasattr(job, 'slots'): 
+            if job['slots'] > 1:  
                 slots = job['slots']
                 sorted_matches = sorted(matches, key=lambda m: m['price_per_cpu_second'])[:slots]
                 candidates = [self.model.processors[m["unique_id"]] for m in sorted_matches]
@@ -62,11 +67,10 @@ class MarketPlace(mesa.Agent):
                 else: 
                     return False
             else: 
-
                 matched_advertisement = min(matches, key=lambda x:x['price_per_cpu_second'])
                 matched_processor = self.model.processors[matched_advertisement["unique_id"]]
 
-            # remove the matched advertisement from the open advertisements
+                # remove the matched advertisement from the open advertisements
                 self.advertisements.pop(matched_advertisement["unique_id"])
                 matched_processor.process_job(job, self.avg_reward)
 
@@ -100,14 +104,15 @@ class ConsumerAgent(mesa.Agent):
             pass
         else: 
             job = {}
-            min_reputation = random.uniform(0.5, 0.9)
+            min_reputation = random.uniform(0.8, 1)
             slots = random.randint(1, 10)
+            has_slots = random.uniform(0, 1) > 0.5 
             job = { 
                 "cpu_seconds": self.cpu_seconds, 
-                "reward": self.reward, 
+                "reward": self.reward, # * slots if has_slots else self.reward, 
                 "resources": self.resources, 
-                "min_reputation": min_reputation if random.uniform(0, 1) > 0.5 else None,
-                "slots": slots if random.uniform(0, 1) > 2 else None,
+                "min_reputation": min_reputation if random.uniform(0, 1) > 0.2 else None,
+                "slots": slots if has_slots else 0, # TODO in presence of slots, the reward should be proportionally higher
                 "consumer_id": self.unique_id
                 }
             self.model.market_place.register_job(job) 
@@ -124,17 +129,21 @@ class ProcessorAgent(mesa.Agent):
     s = 0 
     reputation = 0
 
-    def __init__(self, success_rate, unique_id, model):
+    # type ∈ [low, medium, high] depending on success_rate
+    def __init__(self, success_rate, type, unique_id, model):
         super().__init__(unique_id, model)
         self.price_per_cpu_second = random.randint(1, 100)
-        self.capacity = random.randint(1, 100)
+        self.capacity = random.randint(100, 1000)
         self.success_rate = success_rate
+        self.type = type
 
     def update_reputation(self, job, avg_reward, is_fulfilled):
         w = job['reward'] / (job['reward'] + avg_reward)
         λ = self.model.lmbda
         threshold = (self.r - self.r*λ + self.s*λ)/(self.s+1)
         if is_fulfilled:      
+            self.model.market_place.total_jobs_fulfilled += 1
+
             if w > threshold: 
                 self.r *= λ 
                 self.s *= λ 
@@ -143,6 +152,7 @@ class ProcessorAgent(mesa.Agent):
             self.r *= λ 
             self.s *= λ    
             self.s += w   
+            self.model.market_place.total_jobs_failed += 1
 
         self.reputation = self.calculate_reputation()
 
@@ -156,6 +166,7 @@ class ProcessorAgent(mesa.Agent):
             self.update_reputation(job, avg_reward, is_fulfilled)
         else: 
             self.update_reputation(job, avg_reward, False)
+
 
 
     def calculate_reputation(self):
@@ -186,7 +197,8 @@ def compute_gini(processor_wealths):
     return 1 + (1 / N) - 2 * B
 
 class ReputationModel(mesa.Model):
-    success_rate = 0.95
+    success_rates = [0.9, 0.95, 0.99]
+    types = ['low', 'medium', 'high']
 
     def __init__(self, M, N):
 
@@ -200,12 +212,14 @@ class ReputationModel(mesa.Model):
         self.consumers = {}
         self.processors = {}
 
-        for i in range(self.num_processors):
-            unique_id = "P_"+str(i)
-            a = ProcessorAgent(self.success_rate, unique_id, self)
-            self.schedule.add(a)
-            self.processors[unique_id] = a
-            
+        # introduce three kinds of processors with different success_rates 
+        for i in range(len(self.success_rates)): 
+            for j in range(int(M/len(self.success_rates))): 
+                 unique_id = "P_" + self.types[i] + '_' + str(j)
+                 a = ProcessorAgent(self.success_rates[i], self.types[i], unique_id, self)
+                 self.schedule.add(a)
+                 self.processors[unique_id] = a
+      
         for i in range(self.num_consumers):
             unique_id = "C_"+str(i)
             a = ConsumerAgent("C_"+str(i), self)
@@ -218,46 +232,94 @@ class ReputationModel(mesa.Model):
 
     def step(self):
         self.schedule.step()
-        # num_additional_processors = 10
-        # for i in range(self.num_processors, num_additional_processors):
-        #     unique_id = "P_"+str(i)
-        #     a = ProcessorAgent(self.success_rate, unique_id, self)
-        #     self.schedule.add(a) # They don't seem to be added 
-        #     self.processors[unique_id] = a
-        # self.num_processors += num_additional_processors
-        # self.datacollector.collect(self)
 
+##################################################################################################
 
+incomes_by_type = {}
+reputations_by_type = {}
 
-all_reputations = []
-all_incomes = []
+types = ['low', 'medium', 'high']
 
-for i in range(1): 
-    model = ReputationModel(100, 100)
-    for j in range(10):
+failure_rates = []
+
+for i in range(10): 
+    model = ReputationModel(1000, 1000)
+    for j in range(100):
         model.step()
 
-        incomes = [processor.get_income() for processor in model.processors.values()]
-        for income in incomes: 
-            all_incomes.append(income)        
-        # reputations = [processor.reputation for processor in model.processors.values()]
-        # for reputation in reputations: 
-        #     all_reputations.append(reputation)
+    for type in model.types: 
+        processors_by_type = [p if p.type == type else None for p in model.processors.values()]
+        incomes = [p.get_income() for p in processors_by_type if p is not None]
+        reputations = [p.reputation for p in processors_by_type if p is not None]
+        if type in incomes_by_type: 
+            incomes_by_type[type] += (incomes)
+        else: 
+            incomes_by_type[type] = incomes
+
+        if type in reputations_by_type: 
+            reputations_by_type[type] += (reputations)
+        else: 
+            reputations_by_type[type] = reputations
+
+    failure_rate = model.market_place.total_jobs_failed/(model.market_place.total_jobs_failed + model.market_place.total_jobs_fulfilled)
+    failure_rates.append(failure_rate)
+
+colors = ['blue','red','green']
 
 
 fig = plt.figure(figsize = (10, 5))
 
+
+for i, type in enumerate(types): 
+    incomes = incomes_by_type[type]
+
+    reputations = reputations_by_type[type]
+    print('############### ' + type + ' ###############')
+    print('\n')
+    print('MAX INC ' + str(max(incomes)))
+    print('AVG INC ' + str(sum(incomes)/len(incomes)))
+    print('STDev INC ' + str(statistics.stdev(incomes)))
+
+    print('--------------------------')
+    print('MAX REP ' + str(max(reputations)))
+    print('AVG REP ' + str(sum(reputations)/len(reputations)))
+    print('STDev REP ' + str(statistics.stdev(reputations)))
+
+    print('\n')
+
+    plt.scatter(incomes, reputations, c = colors[i], s=1)
+
+print(failure_rates)
+print('AVG failure rate', str(sum(failure_rates)/len(failure_rates)))
+plt.savefig('ABM_plot.pdf')
+
 # plt.plot(range(0, len(ginis)), ginis)
 # plt.savefig('ABM_plot')
-gini = compute_gini(all_incomes)
-
-
-print(gini)
+# gini = compute_gini(all_incomes)
+# print(gini)
 # print('avg Gini', sum(ginis)/len(ginis))
-plt.xlabel("Reward Income")
-plt.ylabel("Number of Processors")
-plt.title("Students enrolled in different courses")
-plt.hist(all_incomes, bins=range(max(all_incomes) + 1))
-plt.savefig('ABM_plot')
+# plt.xlabel("Reward Income")
+# plt.ylabel("Number of Processors")
+# plt.title("Students enrolled in different courses")
+# plt.hist(all_incomes, bins=range(max(all_incomes) + 1))
+# plt.savefig('ABM_plot')
 
 
+
+
+#❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️
+# KEY Learnings
+# - the impact of the reputation system depends entirely on how the matching is implemented
+# 
+# There are obviously many ways to implement the matching.
+
+# It seems like there are two main approaches: 
+# 
+# 1)    - consider all ads which fulfill min_reputation
+#       - select the cheapest
+#       - in this scenario the consumer may pay less than he's willing to pay
+# 
+# 2)    - find all ads which are within the budget of the job
+#       - select the one with the highest reputation
+#       - since we're not maximizing for price, the consumer should be expected to pay more on average 
+#❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️
