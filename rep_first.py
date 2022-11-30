@@ -41,7 +41,10 @@ class MarketPlace(mesa.Agent):
 
         matches = []
         def has_capacity(advertisement):
-            return advertisement["capacity"] > job["resources"]
+            return advertisement["capacity"] > 1 
+
+        def is_within_budget(advertisement):
+            return job["reward"] > advertisement["price_per_cpu_second"] * job["cpu_seconds"] 
 
         def has_min_reputation(advertisement):
             matched_processor = self.model.processors[advertisement["processor_id"]]
@@ -49,44 +52,60 @@ class MarketPlace(mesa.Agent):
         
         ads_with_capacity = [ad for ad in list(self.advertisements.values()) if has_capacity(ad)]# TODO the matchin also has to include the pricing? 
 
+        ads_within_budget = [ad for ad in ads_with_capacity if is_within_budget(ad)]
+
         if job['min_reputation']:
-            matches = [ad for ad in ads_with_capacity if has_min_reputation(ad)]
+            matches = [ad for ad in ads_within_budget if has_min_reputation(ad)]
         else: 
-            matches = ads_with_capacity
+            matches = ads_within_budget
         
         if len(matches) > 0: 
-            if job['slots'] > 1:  
-                slots = job['slots']
-                sorted_matches = sorted(matches, key=lambda m: m['price_per_cpu_second'])[:slots]
-                candidates = [self.model.processors[m["processor_id"]] for m in sorted_matches]
-                if (len(candidates) == slots):
-                    for candidate in candidates: 
-                        candidate.process_job(job, self.avg_reward, slots)
-                    for advertisement in sorted_matches: 
-                        self.advertisements.pop(advertisement["processor_id"])
-                else: 
-                    return False
-            else: 
-                # TODO instead of matching the cheapest, match that of the processor with the highest reputation
-                candidates = [self.model.processors[m["processor_id"]] for m in matches]
-                matched_advertisement = min(matches, key=lambda x:x['price_per_cpu_second'])
+            slots = job['slots']
+            # sorted_matches = sorted(matches, key=lambda m: m['price_per_cpu_second'])[:slots]
 
+            candidates = [self.model.processors[m["processor_id"]] for m in matches]
+            sorted_candidates = sorted(candidates, key=lambda c: c.reputation)[:slots]
 
-                # matched_processor = self.model.processors[matched_advertisement["processor_id"]]
-                matched_processor = max(candidates, key=lambda x:x.reputation)
-                # match_ad_index = next((index for (index, d) in enumerate(matches) if d["a"] == 1), None)
-
-                # remove the matched advertisement from the open advertisements
+            if (len(sorted_candidates) == slots):
+                for candidate in sorted_candidates: 
+                    candidate.process_job(job, self.avg_reward, slots)
+                    self.advertisements.pop(candidate.unique_id)
                 
-                self.advertisements.pop(matched_processor.unique_id)
-                matched_processor.process_job(job, self.avg_reward)
+                consumer.on_process_job()
+                self.total_jobs_matched += 1
+                self.total_rewards += job['reward']
+                self.avg_reward = self.total_rewards / self.total_jobs_matched 
 
-            consumer.on_process_job()
-            self.total_jobs_matched += 1
-            self.total_rewards += job['reward']
-            self.avg_reward = self.total_rewards / self.total_jobs_matched 
+                return True
         
-            return True
+            else: 
+                return False
+            
+
+            # if job['slots'] > 1:  
+            #     pass
+            # else: 
+            #     # TODO instead of matching the cheapest, match that of the processor with the highest reputation
+            #     candidates = [self.model.processors[m["processor_id"]] for m in matches]
+            #     matched_advertisement = min(matches, key=lambda x:x['price_per_cpu_second'])
+
+
+            #     # matched_processor = self.model.processors[matched_advertisement["processor_id"]]
+            #     matched_processor = max(candidates, key=lambda x:x.reputation)
+            #     # match_ad_index = next((index for (index, d) in enumerate(matches) if d["a"] == 1), None)
+
+            #     # remove the matched advertisement from the open advertisements
+                
+            #     self.advertisements.pop(matched_processor.unique_id)
+            #     matched_processor.process_job(job, self.avg_reward)
+
+            # consumer.on_process_job()
+            # self.total_jobs_matched += 1
+            # self.total_rewards += job['reward']
+            # self.avg_reward = self.total_rewards / self.total_jobs_matched 
+        
+            # return True
+            
         else: 
             return False
         
@@ -100,8 +119,7 @@ class ConsumerAgent(mesa.Agent):
     def __init__(self, unique_id, model):
         super().__init__(unique_id, model)
         self.cpu_seconds = random.randint(1, 100)
-        self.reward = random.randint(1, 100)
-        self.resources = random.randint(1, 100)
+        self.reward = random.randint(1, 10) * self.cpu_seconds
 
     def on_process_job(self):
         self.has_open_jobs = False
@@ -111,15 +129,14 @@ class ConsumerAgent(mesa.Agent):
             pass
         else: 
             job = {}
-            min_reputation = random.uniform(0.5, 1)
+            min_reputation = random.uniform(0.7, 1)
             slots = random.randint(1, 10)
-            has_slots = random.uniform(0, 1) > 0.5 
+            has_multiple_slots = random.uniform(0, 1) > 0.5 
             job = { 
                 "cpu_seconds": self.cpu_seconds, 
-                "reward": self.reward, # * slots if has_slots else self.reward, 
-                "resources": self.resources, 
+                "reward": self.reward * slots if has_multiple_slots else self.reward, 
                 "min_reputation": min_reputation if random.uniform(0, 1) > 0.5 else None,
-                "slots": 0, #slots if has_slots else 0, # TODO in presence of slots, the reward should be proportionally higher
+                "slots": slots if has_multiple_slots else 1, # TODO in presence of slots, the reward should be proportionally higher
                 "consumer_id": self.unique_id
                 }
             self.model.market_place.register_job(job) 
@@ -140,7 +157,7 @@ class ProcessorAgent(mesa.Agent):
     def __init__(self, success_rate, type, unique_id, model):
         super().__init__(unique_id, model)
         self.price_per_cpu_second = random.randint(1, 100)
-        self.capacity = random.randint(100, 1000)
+        self.capacity = random.randint(10, 100)
         self.success_rate = success_rate
         self.type = type
 
@@ -170,7 +187,7 @@ class ProcessorAgent(mesa.Agent):
                 self.income += job['reward']/slots
             else: 
                 self.income += job['reward']
-            self.update_reputation(job, avg_reward, is_fulfilled)
+            self.update_reputation(job, avg_reward, True)
         else: 
             self.update_reputation(job, avg_reward, False)
 
@@ -250,8 +267,8 @@ types = ['low', 'medium', 'high']
 failure_rates = []
 
 for i in range(10): 
-    model = ReputationModel(100, 1000) # TODO 
-    for j in range(200):
+    model = ReputationModel(300, 100) # TODO 
+    for j in range(100):
         model.step()
 
     for type in model.types: 
@@ -284,11 +301,13 @@ for i, type in enumerate(types):
     print('############### ' + type + ' ###############')
     print('\n')
     print('MAX INC ' + str(max(incomes)))
+    print('MIN INC ' + str(min(incomes)))
     print('AVG INC ' + str(sum(incomes)/len(incomes)))
     print('STDev INC ' + str(statistics.stdev(incomes)))
 
     print('--------------------------')
     print('MAX REP ' + str(max(reputations)))
+    print('MIN REP ' + str(min(reputations)))
     print('AVG REP ' + str(sum(reputations)/len(reputations)))
     print('STDev REP ' + str(statistics.stdev(reputations)))
 
