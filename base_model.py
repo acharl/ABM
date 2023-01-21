@@ -19,7 +19,7 @@ class MarketPlace(mesa.Agent):
         self.total_jobs_matched = 0
         self.total_jobs_fulfilled = 0
         self.total_jobs_failed = 0 
-        self.prices_per_cpu_second = [] 
+        self.rewards = [] 
         self.jobs_to_be_matched = {} # indexed by consumer 
         self.advertisements = {} # indexed by processor
         super().__init__(unique_id, model)
@@ -38,7 +38,7 @@ class MarketPlace(mesa.Agent):
             return advertisement["capacity"] > 1 
 
         def is_within_budget(advertisement):
-            if (job["reward"] > advertisement["price_per_cpu_second"] * job["cpu_seconds"] ): 
+            if (job["reward"] > advertisement["fee_per_job"] ): 
                 return True
 
         def has_min_reputation(advertisement):
@@ -56,7 +56,7 @@ class MarketPlace(mesa.Agent):
         
         if len(matches) > 0: 
             slots = job['slots']
-            sorted_matches = sorted(matches, key=lambda m: m['price_per_cpu_second'])[:slots]
+            sorted_matches = sorted(matches, key=lambda m: m['fee_per_job'])[:slots]
             candidates = [self.model.processors[m["processor_id"]] for m in sorted_matches]
 
             if (len(candidates) == slots):
@@ -87,9 +87,8 @@ class ConsumerAgent(mesa.Agent):
     def __init__(self, unique_id, model):
         super().__init__(unique_id, model)
         self.cpu_seconds = random.randint(1, 10)
-        self.max_price_per_cpu_second = random.randint(75, 125)
-        self.price_per_cpu_second = 0.5 * self.max_price_per_cpu_second
-        self.reward = self.price_per_cpu_second * self.cpu_seconds
+        self.max_fee_per_job = random.randint(75, 125)
+        self.reward = 0.5 * self.max_fee_per_job
         self.min_reputation = random.uniform(0.7, 1)
         self.slots = 1 #random.randint(1, 10)
         self.has_multiple_slots = random.uniform(0, 1) > 0.5 
@@ -98,12 +97,9 @@ class ConsumerAgent(mesa.Agent):
         self.has_open_jobs = False
 
     def step(self):
-        if (self.price_per_cpu_second * 1.1 <= self.max_price_per_cpu_second):
-            self.price_per_cpu_second *= 1.1
-        self.reward = self.price_per_cpu_second * self.cpu_seconds
+        if (self.reward * 1.1 <= self.max_fee_per_job):
+            self.reward *= 1.1
         job = { 
-            "price_per_cpu_second": self.price_per_cpu_second,
-            "cpu_seconds": self.cpu_seconds, 
             "reward": self.reward * self.slots if self.has_multiple_slots else self.reward, 
             "min_reputation": self.min_reputation if random.uniform(0, 1) > 0.5 else None,
             "slots": self.slots if self.has_multiple_slots else 1, 
@@ -124,8 +120,8 @@ class ProcessorAgent(mesa.Agent):
     # type ∈ [low, medium, high] depending on success_rate
     def __init__(self, success_rate, type, unique_id, model):
         super().__init__(unique_id, model)
-        self.min_price_per_cpu_second = random.randint(50, 100)
-        self.price_per_cpu_second = 2 * self.min_price_per_cpu_second
+        self.min_fee_per_job = random.randint(50, 100)
+        self.fee_per_job = 2 * self.min_fee_per_job
         self.capacity = random.randint(100, 1000)
         self.success_rate = success_rate
         self.type = type
@@ -158,7 +154,7 @@ class ProcessorAgent(mesa.Agent):
 
     def process_job(self, job, avg_reward, slots = None):
         self.has_open_advertisement = False
-        self.model.market_place.prices_per_cpu_second.append(job['price_per_cpu_second'])
+        self.model.market_place.rewards.append(job['reward'])
         is_fulfilled = random.uniform(0, 1) < self.success_rate
         if is_fulfilled: 
             if slots > 1: 
@@ -179,15 +175,15 @@ class ProcessorAgent(mesa.Agent):
     def step(self):
         def register(): 
             self.advertisement = {
-                "price_per_cpu_second": self.price_per_cpu_second, 
+                "fee_per_job": self.fee_per_job, 
                 "capacity": self.capacity, 
                 "processor_id": self.unique_id
             }
             self.model.market_place.register_advertisement(self.advertisement)
             
         if self.has_open_advertisement:
-            if self.price_per_cpu_second * 0.9 > self.min_price_per_cpu_second: 
-                self.price_per_cpu_second *= 0.9
+            if self.fee_per_job * 0.9 > self.min_fee_per_job: 
+                self.fee_per_job *= 0.9
                 register()
 
         if not self.has_open_advertisement:
@@ -246,7 +242,7 @@ weights_by_type = {}
 types = ['low', 'medium', 'high']
 
 failure_rates = []
-avg_prices_per_cpu_second = []
+avg_reward = []
 total_rewards = []
 total_jobs_matched = []
 for i in range(10): 
@@ -269,9 +265,9 @@ for i in range(10):
             reputations_by_type[type] = reputations
 
 
-    avg_prices = sum(model.market_place.prices_per_cpu_second)/model.market_place.total_jobs_matched
+    avg_prices = sum(model.market_place.rewards)/model.market_place.total_jobs_matched
 
-    avg_prices_per_cpu_second.append(avg_prices)
+    avg_reward.append(avg_prices)
     failure_rate = model.market_place.total_jobs_failed/(model.market_place.total_jobs_failed + model.market_place.total_jobs_fulfilled)
     failure_rates.append(failure_rate)
     total_rewards.append(model.market_place.total_rewards)
@@ -310,7 +306,7 @@ for i, type in enumerate(types):
 print('\n')
 print('AVG failure rate', str(sum(failure_rates)/len(failure_rates)))
 print('\n')
-print('AVG PRICES', str(sum(avg_prices_per_cpu_second)/len(avg_prices_per_cpu_second)))
+print('AVG PRICES', str(sum(avg_reward)/len(avg_reward)))
 print('\n')
 print('AVG total_rewards', str(sum(total_rewards)/len(total_rewards)))
 print('\n')
