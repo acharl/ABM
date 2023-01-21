@@ -197,7 +197,9 @@ def compute_gini(processor_wealths):
     return 1 + (1 / N) - 2 * B
 
 class ReputationModel(mesa.Model):
-    success_rates = [0.9, 0.99, 0.999]
+    #success_rates = [0.9, 0.99, 0.999]
+    success_rates = [0.8, 0.9, 0.999]
+
     types = ['low', 'medium', 'high']
 
     def __init__(self, M, N):
