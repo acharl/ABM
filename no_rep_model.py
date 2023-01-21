@@ -41,19 +41,10 @@ class MarketPlace(mesa.Agent):
             if (job["reward"] > advertisement["fee_per_job"] ): 
                 return True
 
-        def has_min_reputation(advertisement):
-            matched_processor = self.model.processors[advertisement["processor_id"]]
-            return matched_processor.get_reputation() > job['min_reputation']
-        
         ads_with_capacity = [ad for ad in list(self.advertisements.values()) if has_capacity(ad)]
 
-        ads_within_budget = [ad for ad in ads_with_capacity if is_within_budget(ad)]
+        matches = [ad for ad in ads_with_capacity if is_within_budget(ad)]
 
-        if job['min_reputation']:
-            matches = [ad for ad in ads_within_budget if has_min_reputation(ad)] # TODO
-        else: 
-            matches = ads_within_budget
-        
         if len(matches) > 0: 
             slots = job['slots']
             sorted_matches = sorted(matches, key=lambda m: m['fee_per_job'])[:slots]
@@ -63,7 +54,7 @@ class MarketPlace(mesa.Agent):
                 for candidate in candidates: 
                     candidate.process_job(job, self.avg_reward, slots)
                 for advertisement in sorted_matches: 
-                    self.advertisements.pop(advertisement["processor_id"]) 
+                    self.advertisements.pop(advertisement["processor_id"])
                 
                 consumer.on_process_job()
                 self.total_jobs_matched += 1
@@ -89,7 +80,6 @@ class ConsumerAgent(mesa.Agent):
         self.cpu_seconds = random.randint(1, 10)
         self.max_fee_per_job = random.randint(75, 125)
         self.reward = 0.5 * self.max_fee_per_job
-        self.min_reputation = random.uniform(0.7, 1)
         self.slots = 1 #random.randint(1, 10)
         self.has_multiple_slots = random.uniform(0, 1) > 0.5 
 
@@ -101,7 +91,6 @@ class ConsumerAgent(mesa.Agent):
             self.reward *= 1.1
         job = { 
             "reward": self.reward * self.slots if self.has_multiple_slots else self.reward, 
-            "min_reputation": self.min_reputation if random.uniform(0, 1) > 0.5 else None,
             "slots": self.slots if self.has_multiple_slots else 1, 
             "consumer_id": self.unique_id
         }
@@ -247,7 +236,7 @@ failure_rates = []
 avg_reward = []
 total_rewards = []
 total_jobs_matched = []
-for i in range(10): 
+for i in range(1): 
     model = ReputationModel(300, 1000) # TODO 
     for j in range(200):
         model.step()
@@ -318,7 +307,7 @@ print('total_jobs_matched', total_jobs_matched)
 print('\n')
 
 
-plt.savefig('ABM_plot.pdf')
+plt.savefig('plots/PLOT_no_rep.pdf')
 
 # plt.plot(range(0, len(ginis)), ginis)
 # plt.savefig('ABM_plot')
