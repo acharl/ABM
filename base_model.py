@@ -32,9 +32,7 @@ class MarketPlace(mesa.Agent):
         self.advertisements[advertisement["processor_id"]] = advertisement
 
     def match_job(self, job): 
-
         consumer = self.model.consumers[job["consumer_id"]]
-
         matches = []
         def has_capacity(advertisement):
             return advertisement["capacity"] > 1 
@@ -252,8 +250,8 @@ avg_prices_per_cpu_second = []
 total_rewards = []
 total_jobs_matched = []
 for i in range(10): 
-    model = ReputationModel(300, 300) # TODO 
-    for j in range(100):
+    model = ReputationModel(100, 1000) # TODO 
+    for j in range(200):
         model.step()
 
     for type in model.types: 
