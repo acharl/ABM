@@ -298,10 +298,10 @@ for i, type in enumerate(types):
 
 print(failure_rates)
 print('AVG failure rate', str(sum(failure_rates)/len(failure_rates)))
-plt.savefig('ABM_plot.pdf')
+plt.savefig('plots/ABM_plot.pdf')
 
 # plt.plot(range(0, len(ginis)), ginis)
-# plt.savefig('ABM_plot')
+# plt.savefig('plots/ABM_plot')
 # gini = compute_gini(all_incomes)
 # print(gini)
 # print('avg Gini', sum(ginis)/len(ginis))
@@ -309,7 +309,7 @@ plt.savefig('ABM_plot.pdf')
 # plt.ylabel("Number of Processors")
 # plt.title("Students enrolled in different courses")
 # plt.hist(all_incomes, bins=range(max(all_incomes) + 1))
-# plt.savefig('ABM_plot')
+# plt.savefig('plots/ABM_plot')
 
 
 

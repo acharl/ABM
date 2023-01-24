@@ -46,7 +46,8 @@ class MarketPlace(mesa.Agent):
 
         def has_min_reputation(advertisement):
             matched_processor = self.model.processors[advertisement["processor_id"]]
-            return matched_processor.get_reputation() >= self.ninetieth_percentile
+            return matched_processor.get_reputation() > job['min_reputation']
+
         
         ads_with_capacity = [ad for ad in list(self.advertisements.values()) if has_capacity(ad)]
         ads_within_budget = [ad for ad in ads_with_capacity if is_within_budget(ad)]
@@ -67,7 +68,7 @@ class MarketPlace(mesa.Agent):
                 # for advertisement in matches: 
                 #     self.advertisements.pop(advertisement["processor_id"]) # ❗️❗️❗️ KEY DIFFERENCE in comparison to base model. Here, we allow a processor to be allocated multiple jobs according to his capacity 
                 
-                consumer.on_process_job()
+                consumer.on_process_job(job)
                 self.total_jobs_matched += 1
                 self.total_rewards += job['reward']
                 self.avg_reward = self.total_rewards / self.total_jobs_matched 
@@ -85,29 +86,44 @@ class MarketPlace(mesa.Agent):
             self.match_job(job)
 
 class ConsumerAgent(mesa.Agent):
-    has_open_jobs = False
+    
     job = {}
     def __init__(self, unique_id, model):
         super().__init__(unique_id, model)
-        self.cpu_seconds = random.randint(1, 10)
         self.max_fee_per_job = random.randint(75, 125)
         self.reward = 0.5 * self.max_fee_per_job
         self.slots = 1 #random.randint(1, 10)
         self.has_multiple_slots = random.uniform(0, 1) > 0.5 
+        self.has_matched_job = False
+        self.expects_min_reputation = True if random.uniform(0, 1) < 0.9 else None
 
-    def on_process_job(self):
-        self.has_open_jobs = False
+    def on_process_job(self, job):
+        self.reward = job['reward']
+        self.has_matched_job = True
 
     def step(self):
         if (self.reward * 1.1 <= self.max_fee_per_job):
             self.reward *= 1.1
         job = { 
             "reward": self.reward * self.slots if self.has_multiple_slots else self.reward, 
-            "min_reputation": True if random.uniform(0, 1) < 0.9 else None,
+            # "min_reputation": self.expects_min_reputation,
+            "min_reputation": None, #True if random.uniform(0, 1) < 0.9 else None,
             "slots": self.slots if self.has_multiple_slots else 1, 
             "consumer_id": self.unique_id
         }
         self.model.market_place.register_job(job) 
+
+    # def step(self): ❗️❗️❗️ This version doesn't let the reward go up to max_fee_per_job
+    #     if (self.reward * 1.1 <= self.max_fee_per_job):
+    #         self.reward *= 1.1
+    #     job = { 
+    #         "reward": self.reward * self.slots if self.has_multiple_slots else self.reward, 
+    #         "min_reputation": True if random.uniform(0, 1) < 0.9 else None,
+    #         "slots": self.slots if self.has_multiple_slots else 1, 
+    #         "consumer_id": self.unique_id
+    #     }
+    #     self.model.market_place.register_job(job) 
+                        
             
 class ProcessorAgent(mesa.Agent):
     weights = []
@@ -125,7 +141,7 @@ class ProcessorAgent(mesa.Agent):
         super().__init__(unique_id, model)
         self.min_fee_per_job = random.randint(50, 100)
         self.fee_per_job = 2 * self.min_fee_per_job
-        self.capacity = random.randint(10, 1000)
+        self.capacity = random.randint(100, 1000)
 
         self.success_rate = success_rate
         self.type = type
@@ -134,7 +150,6 @@ class ProcessorAgent(mesa.Agent):
         w = job['reward'] / (job['reward'] + avg_reward)
         self.weights.append(w)
         λ = self.model.lmbda
-        threshold = (self.r - self.r*λ + self.s*λ)/(self.s+1)
         if is_fulfilled:      
             self.model.market_place.total_jobs_fulfilled += 1
             self.r *= λ 
@@ -259,7 +274,7 @@ avg_reward = []
 total_rewards = []
 total_jobs_matched = []
 for i in range(10): 
-    model = ReputationModel(300, 1000) # TODO 
+    model = ReputationModel(300,900) 
     for j in range(200):
         model.step()
 
@@ -294,7 +309,7 @@ for i in range(10):
 colors = ['blue','red','green']
 
 
-fig = plt.figure(figsize = (10, 5))
+fig = plt.figure(figsize = (7, 5))
 
 for i, type in enumerate(types): 
     incomes = incomes_by_type[type]
@@ -334,10 +349,10 @@ print('total_jobs_matched', total_jobs_matched)
 print('\n')
 
 
-plt.savefig('PLOT_base_percentile.pdf')
+plt.savefig('plots/PLOT_base_percentile.pdf')
 
 # plt.plot(range(0, len(ginis)), ginis)
-# plt.savefig('ABM_plot')
+# plt.savefig('plots/ABM_plot')
 # gini = compute_gini(all_incomes)
 # print(gini)
 # print('avg Gini', sum(ginis)/len(ginis))
@@ -345,7 +360,7 @@ plt.savefig('PLOT_base_percentile.pdf')
 # plt.ylabel("Number of Processors")
 # plt.title("Students enrolled in different courses")
 # plt.hist(all_incomes, bins=range(max(all_incomes) + 1))
-# plt.savefig('ABM_plot')
+# plt.savefig('plots/ABM_plot')
 
 
 
