@@ -46,8 +46,7 @@ class MarketPlace(mesa.Agent):
 
         def has_min_reputation(advertisement):
             matched_processor = self.model.processors[advertisement["processor_id"]]
-            return matched_processor.get_reputation() > job['min_reputation']
-
+            return matched_processor.get_reputation() >= self.ninetieth_percentile
         
         ads_with_capacity = [ad for ad in list(self.advertisements.values()) if has_capacity(ad)]
         ads_within_budget = [ad for ad in ads_with_capacity if is_within_budget(ad)]
