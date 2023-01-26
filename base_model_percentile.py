@@ -48,7 +48,7 @@ class MarketPlace(mesa.Agent):
             matched_processor = self.model.processors[advertisement["processor_id"]]
             return matched_processor.get_reputation() >= self.ninetieth_percentile
         
-        ads_with_capacity = [ad for ad in list(self.advertisements.values()) if has_capacity(ad)]
+        ads_with_capacity = [ad for ad in list(self.advertisements.values())] # TODO if has_capacity(ad)
         ads_within_budget = [ad for ad in ads_with_capacity if is_within_budget(ad)]
 
         if job['min_reputation']:
@@ -94,9 +94,11 @@ class ConsumerAgent(mesa.Agent):
         self.slots = 1 #random.randint(1, 10)
         self.has_multiple_slots = random.uniform(0, 1) > 0.5 
         self.has_matched_job = False
-        self.expects_min_reputation = True if random.uniform(0, 1) < 0.9 else None
+        self.expects_min_reputation = True if random.uniform(0, 1) < 0.5 else None
+        self.allocated_jobs = 0
 
     def on_process_job(self, job):
+        self.allocated_jobs += 1
         self.reward = job['reward']
         self.has_matched_job = True
 
@@ -105,8 +107,8 @@ class ConsumerAgent(mesa.Agent):
             self.reward *= 1.1
         job = { 
             "reward": self.reward * self.slots if self.has_multiple_slots else self.reward, 
-            # "min_reputation": self.expects_min_reputation,
-            "min_reputation": None, #True if random.uniform(0, 1) < 0.9 else None,
+            "min_reputation": self.expects_min_reputation,
+            # "min_reputation":None,# True if random.uniform(0, 1) < 0.9 else None,
             "slots": self.slots if self.has_multiple_slots else 1, 
             "consumer_id": self.unique_id
         }
@@ -139,11 +141,13 @@ class ProcessorAgent(mesa.Agent):
     def __init__(self, success_rate, type, unique_id, model):
         super().__init__(unique_id, model)
         self.min_fee_per_job = random.randint(50, 100)
-        self.fee_per_job = 2 * self.min_fee_per_job
-        self.capacity = random.randint(100, 1000)
+        self.fee_per_job = 80# 2 * self.min_fee_per_job
+        self.capacity = 10#random.randint(100, 1000) # number of jobs a processor is able to process simultaneously 
 
         self.success_rate = success_rate
         self.type = type
+        
+
 
     def update_reputation(self, job, avg_reward, is_fulfilled):
         w = job['reward'] / (job['reward'] + avg_reward)
@@ -165,7 +169,8 @@ class ProcessorAgent(mesa.Agent):
 
     def get_reputation(self): 
         λ = self.model.lmbda
-        return self.reputation * (3-2*λ)
+        rep = self.reputation
+        return rep*(((1/(1-λ)) + 2)/(1/(1-λ)))
 
     def get_weights(self): 
         return sum(self.weights)/len(self.weights)
@@ -206,15 +211,21 @@ class ProcessorAgent(mesa.Agent):
             
 
     def step(self):
-        if self.has_open_advertisement:
-            if self.fee_per_job * 0.9 > self.min_fee_per_job: 
-                self.fee_per_job *= 0.9
-                self.register()
+        self.capacity = 10
+        self.register()
+        pass
+        #  if self.fee_per_job * 0.9 > self.min_fee_per_job: 
+        #         self.fee_per_job *= 0.9
+        #         self.register()        
+        # if self.has_open_advertisement:
+        #     if self.fee_per_job * 0.9 > self.min_fee_per_job: 
+        #         self.fee_per_job *= 0.9
+        #         self.register()
 
-        if not self.has_open_advertisement:
-            self.has_open_advertisement = True
-            self.register()
-        
+        # if not self.has_open_advertisement:
+        #     self.has_open_advertisement = True
+        #     self.register()
+
 def compute_gini(processor_wealths): 
     x = sorted(processor_wealths)
     N = len(processor_wealths)
@@ -319,6 +330,8 @@ for i, type in enumerate(types):
 
     print('############### ' + type + ' ###############')
     print('\n')
+    print('AVG Pr. JOBS ' + str(sum(processed_jobs)/len(processed_jobs)))
+    print('\n')
 
     print('MAX INC ' + str(max(incomes)))
     print('MIN INC ' + str(min(incomes)))
@@ -332,6 +345,7 @@ for i, type in enumerate(types):
     print('STDev REP ' + str(statistics.stdev(reputations)))
     print('\n')
 
+# TODO JGD NEXT number of jobs allocated by type
 
     plt.scatter(incomes, reputations, c = colors[i], s=1)
 
