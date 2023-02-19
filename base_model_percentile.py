@@ -30,9 +30,6 @@ class MarketPlace(mesa.Agent):
     def match_job(self, job): 
         consumer = self.model.consumers[job["consumer_id"]]
         matches = []
-        def has_capacity(advertisement):
-            return advertisement["capacity"] > 1 
-
         def is_within_budget(advertisement):
             if (job["reward"] > advertisement["fee_per_job"] ): 
                 return True
@@ -40,14 +37,13 @@ class MarketPlace(mesa.Agent):
         def has_min_reputation(advertisement):
             matched_processor = self.model.processors[advertisement["processor_id"]]
             # return matched_processor.get_reputation() >= job['min_reputation']
-
             return matched_processor.get_reputation() >= self.ninetieth_percentile
         
-        ads_with_capacity = [ad for ad in list(self.advertisements.values())] # TODO if has_capacity(ad)
+        ads_with_capacity = [ad for ad in list(self.advertisements.values())] 
         ads_within_budget = [ad for ad in ads_with_capacity if is_within_budget(ad)]
 
         if job['min_reputation']:
-            matches = [ad for ad in ads_within_budget if has_min_reputation(ad)] # TODO
+            matches = [ad for ad in ads_within_budget if has_min_reputation(ad)] 
         else: 
             matches = ads_within_budget
             
@@ -59,9 +55,6 @@ class MarketPlace(mesa.Agent):
             if (len(candidates) == slots):
                 for candidate in candidates: 
                     candidate.process_job(job, self.avg_reward, slots)
-                # for advertisement in matches: 
-                #     self.advertisements.pop(advertisement["processor_id"]) # ❗️❗️❗️ KEY DIFFERENCE in comparison to base model. Here, we allow a processor to be allocated multiple jobs according to his capacity 
-                
                 self.jobs_to_be_matched[job['consumer_id']] = None
                 consumer.on_process_job(job)
                 self.total_jobs_matched += 1
@@ -139,8 +132,8 @@ class ProcessorAgent(mesa.Agent):
     def __init__(self, success_rate, type, unique_id, model):
         super().__init__(unique_id, model)
         self.min_fee_per_job = random.randint(50, 100)
-        self.fee_per_job = 80#2 * self.min_fee_per_job
-        self.capacity = 10#random.randint(100, 1000) # number of jobs a processor is able to process simultaneously 
+        self.fee_per_job = 80
+        self.capacity = 10
 
         self.success_rate = success_rate
         self.type = type
@@ -174,7 +167,6 @@ class ProcessorAgent(mesa.Agent):
 
     def process_job(self, job, avg_reward, slots = None):
         self.processed_jobs += 1
-        self.capacity -= 1
         self.has_open_advertisement = False
         self.model.market_place.rewards.append(job['reward'])
         is_fulfilled = random.uniform(0, 1) < self.success_rate
@@ -199,14 +191,12 @@ class ProcessorAgent(mesa.Agent):
     def register(self): 
         self.advertisement = {
             "fee_per_job": self.fee_per_job, 
-            "capacity": self.capacity, 
             "processor_id": self.unique_id
         }
         self.model.market_place.register_advertisement(self.advertisement)
             
 
     def step(self):
-        self.capacity = 10
         self.register()
         pass
         #  if self.fee_per_job * 0.9 > self.min_fee_per_job: 
