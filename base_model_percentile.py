@@ -4,21 +4,13 @@ import matplotlib.pyplot as plt
 import statistics
 import numpy as np
 
-
-# This ABM instance should ideally reflect the behaviour of the matching algorithm 
-# as well as the reputation system. 
-# 
-# - Potentially we would have to simplify the matching algo a bit, while we can implement the rep system 1:1
-# 
-# - I suppose the most interesting aspect is to see whether there is some kind of dominance of a handful of processors which emerges 
-
-
 class MarketPlace(mesa.Agent):
 
     def __init__(self, unique_id, model):
         self.avg_reward = 0
         self.total_rewards = 0
         self.total_jobs_matched = 0
+        self.total_jobs_registered = 0
         self.total_jobs_fulfilled = 0
         self.total_jobs_failed = 0 
         self.ninetieth_percentile = 0 # the ninetieth percentile with respect to processors' reputations
@@ -28,6 +20,7 @@ class MarketPlace(mesa.Agent):
         super().__init__(unique_id, model)
         
     def register_job(self, job):
+        self.total_jobs_registered += 1
         if (not self.match_job(job)):
             self.jobs_to_be_matched[job['consumer_id']] = job 
         
@@ -46,6 +39,8 @@ class MarketPlace(mesa.Agent):
 
         def has_min_reputation(advertisement):
             matched_processor = self.model.processors[advertisement["processor_id"]]
+            # return matched_processor.get_reputation() >= job['min_reputation']
+
             return matched_processor.get_reputation() >= self.ninetieth_percentile
         
         ads_with_capacity = [ad for ad in list(self.advertisements.values())] # TODO if has_capacity(ad)
@@ -67,6 +62,7 @@ class MarketPlace(mesa.Agent):
                 # for advertisement in matches: 
                 #     self.advertisements.pop(advertisement["processor_id"]) # ❗️❗️❗️ KEY DIFFERENCE in comparison to base model. Here, we allow a processor to be allocated multiple jobs according to his capacity 
                 
+                self.jobs_to_be_matched[job['consumer_id']] = None
                 consumer.on_process_job(job)
                 self.total_jobs_matched += 1
                 self.total_rewards += job['reward']
@@ -81,7 +77,7 @@ class MarketPlace(mesa.Agent):
             return False
         
     def step(self):
-        for job in self.jobs_to_be_matched.values(): 
+        for job in [self.jobs_to_be_matched[i] for i in self.jobs_to_be_matched if self.jobs_to_be_matched[i] is not None]:
             self.match_job(job)
 
 class ConsumerAgent(mesa.Agent):
@@ -95,6 +91,7 @@ class ConsumerAgent(mesa.Agent):
         self.has_multiple_slots = random.uniform(0, 1) > 0.5 
         self.has_matched_job = False
         self.expects_min_reputation = True if random.uniform(0, 1) < 0.5 else None
+        self.min_reputation = random.uniform(0.8, 1)
         self.allocated_jobs = 0
 
     def on_process_job(self, job):
@@ -107,8 +104,9 @@ class ConsumerAgent(mesa.Agent):
             self.reward *= 1.1
         job = { 
             "reward": self.reward * self.slots if self.has_multiple_slots else self.reward, 
+            # "min_reputation": None,
             "min_reputation": self.expects_min_reputation,
-            # "min_reputation":None,# True if random.uniform(0, 1) < 0.9 else None,
+            # "min_reputation": self.min_reputation if random.uniform(0, 1) < 0.5 else None,
             "slots": self.slots if self.has_multiple_slots else 1, 
             "consumer_id": self.unique_id
         }
@@ -141,7 +139,7 @@ class ProcessorAgent(mesa.Agent):
     def __init__(self, success_rate, type, unique_id, model):
         super().__init__(unique_id, model)
         self.min_fee_per_job = random.randint(50, 100)
-        self.fee_per_job = 80# 2 * self.min_fee_per_job
+        self.fee_per_job = 80#2 * self.min_fee_per_job
         self.capacity = 10#random.randint(100, 1000) # number of jobs a processor is able to process simultaneously 
 
         self.success_rate = success_rate
@@ -151,26 +149,25 @@ class ProcessorAgent(mesa.Agent):
 
     def update_reputation(self, job, avg_reward, is_fulfilled):
         w = job['reward'] / (job['reward'] + avg_reward)
-        self.weights.append(w)
         λ = self.model.lmbda
+        self.r *= λ 
+        self.s *= λ 
         if is_fulfilled:      
             self.model.market_place.total_jobs_fulfilled += 1
-            self.r *= λ 
-            self.s *= λ 
             self.r += w
         else: 
-            self.r *= λ 
-            self.s *= λ    
             self.s += w   
             self.model.market_place.total_jobs_failed += 1
-
         self.reputation = self.calculate_reputation()
 
-
+    def calculate_reputation(self):
+        return (self.r+1) / (self.r+self.s+2)
+         
     def get_reputation(self): 
         λ = self.model.lmbda
+        mu = ((1/(1-λ)) + 1)/(((1/(1-λ)) + 2))
         rep = self.reputation
-        return rep*(((1/(1-λ)) + 2)/(1/(1-λ)))
+        return rep / mu
 
     def get_weights(self): 
         return sum(self.weights)/len(self.weights)
@@ -192,9 +189,7 @@ class ProcessorAgent(mesa.Agent):
             self.update_reputation(job, avg_reward, False) 
         self.register()
 
-    def calculate_reputation(self):
-        return (self.r+1) / (self.r+self.s+2)
-         
+
     def get_income(self): 
         return self.income
 
@@ -233,9 +228,9 @@ def compute_gini(processor_wealths):
     return 1 + (1 / N) - 2 * B
 
 class ReputationModel(mesa.Model):
-    success_rates = [0.8, 0.9, 0.999]
+    success_rates = [0.8, 0.9, 0.95]
 
-    types = ['low', 'medium', 'high']
+    types = ['low', 'medium', 'high', 'ultra']
 
     def __init__(self, M, N):
 
@@ -256,7 +251,13 @@ class ReputationModel(mesa.Model):
                  processor_agent = ProcessorAgent(self.success_rates[i], self.types[i], unique_id, self)
                  self.schedule.add(processor_agent)
                  self.processors[unique_id] = processor_agent
-      
+
+        for j in range(30):
+             unique_id = "P_" + self.types[3] + '_' + str(j)
+             processor_agent = ProcessorAgent(0.999, self.types[3], unique_id, self)
+             self.schedule.add(processor_agent)
+             self.processors[unique_id] = processor_agent        
+
         for i in range(self.num_consumers):
             unique_id = "C_"+str(i)
             consumer_agent = ConsumerAgent("C_"+str(i), self)
@@ -277,12 +278,14 @@ reputations_by_type = {}
 processed_jobs_by_type = {}
 weights_by_type = {}
 
-types = ['low', 'medium', 'high']
+types = ['low', 'medium', 'high', 'ultra']
 
+all_incomes = []
 failure_rates = []
 avg_reward = []
 total_rewards = []
 total_jobs_matched = []
+total_jobs_registered = []
 for i in range(10): 
     model = ReputationModel(300,900) 
     for j in range(200):
@@ -291,6 +294,7 @@ for i in range(10):
     for type in model.types: 
         processors_by_type = [p if p.type == type else None for p in model.processors.values()]
         incomes = [p.get_income() for p in processors_by_type if p is not None]
+        all_incomes+=incomes
         reputations = [p.get_reputation() for p in processors_by_type if p is not None]
         processed_jobs = [p.get_processed_jobs() for p in processors_by_type if p is not None]
 
@@ -315,8 +319,9 @@ for i in range(10):
     failure_rates.append(failure_rate)
     total_rewards.append(model.market_place.total_rewards)
     total_jobs_matched.append(model.market_place.total_jobs_matched)
+    total_jobs_registered.append(model.market_place.total_jobs_registered)
 
-colors = ['blue','red','green']
+colors = ['blue','red','green', 'purple']
 
 
 fig = plt.figure(figsize = (7, 5))
@@ -347,7 +352,11 @@ for i, type in enumerate(types):
 
 # TODO JGD NEXT number of jobs allocated by type
 
+
     plt.scatter(incomes, reputations, c = colors[i], s=1)
+
+plt.xlabel('Income')
+plt.ylabel('Reputation')
 
 print('\n')
 print('AVG failure rate', str(sum(failure_rates)/len(failure_rates)))
@@ -357,6 +366,8 @@ print('\n')
 print('AVG total_rewards', str(sum(total_rewards)/len(total_rewards)))
 print('\n')
 print('AVG total_jobs_matched', str(sum(total_jobs_matched)/len(total_jobs_matched)))
+print('\n')
+print('AVG total_jobs_registered', str(sum(total_jobs_registered)/len(total_jobs_registered)))
 print('\n')
 print('total_jobs_matched', total_jobs_matched)
 print('\n')
@@ -368,14 +379,16 @@ plt.savefig('plots/PLOT_base_percentile.pdf')
 # plt.savefig('plots/ABM_plot')
 # gini = compute_gini(all_incomes)
 # print(gini)
-# print('avg Gini', sum(ginis)/len(ginis))
 # plt.xlabel("Reward Income")
 # plt.ylabel("Number of Processors")
 # plt.title("Students enrolled in different courses")
 # plt.hist(all_incomes, bins=range(max(all_incomes) + 1))
 # plt.savefig('plots/ABM_plot')
 
-
+print('##############################')
+gini = compute_gini(all_incomes)
+print('GINI ' + str(gini))
+print('##############################')
 
 
 #❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️
