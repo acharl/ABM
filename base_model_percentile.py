@@ -104,18 +104,7 @@ class ConsumerAgent(mesa.Agent):
             "consumer_id": self.unique_id
         }
         self.model.market_place.register_job(job) 
-
-    # def step(self): ❗️❗️❗️ This version doesn't let the reward go up to max_fee_per_job
-    #     if (self.reward * 1.1 <= self.max_fee_per_job):
-    #         self.reward *= 1.1
-    #     job = { 
-    #         "reward": self.reward * self.slots if self.has_multiple_slots else self.reward, 
-    #         "min_reputation": True if random.uniform(0, 1) < 0.9 else None,
-    #         "slots": self.slots if self.has_multiple_slots else 1, 
-    #         "consumer_id": self.unique_id
-    #     }
-    #     self.model.market_place.register_job(job) 
-                        
+           
             
 class ProcessorAgent(mesa.Agent):
     weights = []
@@ -133,13 +122,9 @@ class ProcessorAgent(mesa.Agent):
         super().__init__(unique_id, model)
         self.min_fee_per_job = random.randint(50, 100)
         self.fee_per_job = 80
-        self.capacity = 10
-
         self.success_rate = success_rate
         self.type = type
         
-
-
     def update_reputation(self, job, avg_reward, is_fulfilled):
         w = job['reward'] / (job['reward'] + avg_reward)
         λ = self.model.lmbda
@@ -199,17 +184,6 @@ class ProcessorAgent(mesa.Agent):
     def step(self):
         self.register()
         pass
-        #  if self.fee_per_job * 0.9 > self.min_fee_per_job: 
-        #         self.fee_per_job *= 0.9
-        #         self.register()        
-        # if self.has_open_advertisement:
-        #     if self.fee_per_job * 0.9 > self.min_fee_per_job: 
-        #         self.fee_per_job *= 0.9
-        #         self.register()
-
-        # if not self.has_open_advertisement:
-        #     self.has_open_advertisement = True
-        #     self.register()
 
 def compute_gini(processor_wealths): 
     x = sorted(processor_wealths)
@@ -276,7 +250,7 @@ avg_reward = []
 total_rewards = []
 total_jobs_matched = []
 total_jobs_registered = []
-for i in range(10): 
+for i in range(1): 
     model = ReputationModel(300,900) 
     for j in range(200):
         model.step()
@@ -363,37 +337,9 @@ print('total_jobs_matched', total_jobs_matched)
 print('\n')
 
 
-plt.savefig('plots/PLOT_base_percentile.pdf')
-
-# plt.plot(range(0, len(ginis)), ginis)
-# plt.savefig('plots/ABM_plot')
-# gini = compute_gini(all_incomes)
-# print(gini)
-# plt.xlabel("Reward Income")
-# plt.ylabel("Number of Processors")
-# plt.title("Students enrolled in different courses")
-# plt.hist(all_incomes, bins=range(max(all_incomes) + 1))
-# plt.savefig('plots/ABM_plot')
+plt.savefig('PLOT.pdf')
 
 print('##############################')
 gini = compute_gini(all_incomes)
 print('GINI ' + str(gini))
 print('##############################')
-
-
-#❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️
-# KEY Learnings
-# - the impact of the reputation system depends entirely on how the matching is implemented
-# 
-# There are obviously many ways to implement the matching.
-
-# It seems like there are two main approaches: 
-# 
-# 1)    - consider all ads which fulfill min_reputation
-#       - select the cheapest
-#       - in this scenario the consumer may pay less than he's willing to pay
-# 
-# 2)    - find all ads which are within the budget of the job
-#       - select the one with the highest reputation
-#       - since we're not maximizing for price, the consumer should be expected to pay more on average 
-#❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️❗️
