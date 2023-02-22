@@ -36,8 +36,8 @@ class MarketPlace(mesa.Agent):
 
         def has_min_reputation(advertisement):
             matched_processor = self.model.processors[advertisement["processor_id"]]
-            # return matched_processor.get_reputation() >= job['min_reputation']
-            return matched_processor.get_reputation() >= self.ninetieth_percentile
+            return matched_processor.get_reputation() >= job['min_reputation']
+            # return matched_processor.get_reputation() >= self.ninetieth_percentile
         
         ads_with_capacity = [ad for ad in list(self.advertisements.values())] 
         ads_within_budget = [ad for ad in ads_with_capacity if is_within_budget(ad)]
@@ -98,24 +98,23 @@ class ConsumerAgent(mesa.Agent):
         job = { 
             "reward": self.reward * self.slots if self.has_multiple_slots else self.reward, 
             # "min_reputation": None,
-            "min_reputation": self.expects_min_reputation,
-            # "min_reputation": self.min_reputation if random.uniform(0, 1) < 0.5 else None,
+            # "min_reputation": self.expects_min_reputation,
+            "min_reputation": self.min_reputation if random.uniform(0, 1) < 0.5 else None,
             "slots": self.slots if self.has_multiple_slots else 1, 
             "consumer_id": self.unique_id
         }
         self.model.market_place.register_job(job) 
            
             
-class ProcessorAgent(mesa.Agent):
+class TransmitterAgent(mesa.Agent):
     weights = []
     has_open_advertisement = False
     income = 0 
-    processed_jobs = 0 
     
     advertisement = {}
     r = 0 
     s = 0 
-    reputation = 0
+    
 
     # type ∈ [low, medium, high] depending on success_rate
     def __init__(self, success_rate, type, unique_id, model):
@@ -124,7 +123,8 @@ class ProcessorAgent(mesa.Agent):
         self.fee_per_job = 80
         self.success_rate = success_rate
         self.type = type
-        
+        self.reputation = self.calculate_reputation()
+
     def update_reputation(self, job, avg_reward, is_fulfilled):
         w = job['reward'] / (job['reward'] + avg_reward)
         λ = self.model.lmbda
@@ -151,7 +151,6 @@ class ProcessorAgent(mesa.Agent):
         return sum(self.weights)/len(self.weights)
 
     def process_job(self, job, avg_reward, slots = None):
-        self.processed_jobs += 1
         self.has_open_advertisement = False
         self.model.market_place.rewards.append(job['reward'])
         is_fulfilled = random.uniform(0, 1) < self.success_rate
@@ -170,8 +169,6 @@ class ProcessorAgent(mesa.Agent):
     def get_income(self): 
         return self.income
 
-    def get_processed_jobs(self): 
-        return self.processed_jobs
 
     def register(self): 
         self.advertisement = {
@@ -192,7 +189,7 @@ def compute_gini(processor_wealths):
     return 1 + (1 / N) - 2 * B
 
 class ReputationModel(mesa.Model):
-    success_rates = [0.8, 0.9, 0.95]
+    success_rates = [0.8, 0.9, 0.99]
 
     types = ['low', 'medium', 'high', 'ultra']
 
@@ -212,15 +209,15 @@ class ReputationModel(mesa.Model):
         for i in range(len(self.success_rates)): 
             for j in range(int(M/len(self.success_rates))): 
                  unique_id = "P_" + self.types[i] + '_' + str(j)
-                 processor_agent = ProcessorAgent(self.success_rates[i], self.types[i], unique_id, self)
+                 processor_agent = TransmitterAgent(self.success_rates[i], self.types[i], unique_id, self)
                  self.schedule.add(processor_agent)
                  self.processors[unique_id] = processor_agent
 
-        for j in range(30):
-             unique_id = "P_" + self.types[3] + '_' + str(j)
-             processor_agent = ProcessorAgent(0.999, self.types[3], unique_id, self)
-             self.schedule.add(processor_agent)
-             self.processors[unique_id] = processor_agent        
+        # for j in range(30):
+        #      unique_id = "P_" + self.types[3] + '_' + str(j)
+        #      processor_agent = TransmitterAgent(0.999, self.types[3], unique_id, self)
+        #      self.schedule.add(processor_agent)
+        #      self.processors[unique_id] = processor_agent        
 
         for i in range(self.num_consumers):
             unique_id = "C_"+str(i)
@@ -239,10 +236,9 @@ class ReputationModel(mesa.Model):
 
 incomes_by_type = {}
 reputations_by_type = {}
-processed_jobs_by_type = {}
 weights_by_type = {}
 
-types = ['low', 'medium', 'high', 'ultra']
+types = ['low', 'medium', 'high']
 
 all_incomes = []
 failure_rates = []
@@ -260,7 +256,6 @@ for i in range(1):
         incomes = [p.get_income() for p in processors_by_type if p is not None]
         all_incomes+=incomes
         reputations = [p.get_reputation() for p in processors_by_type if p is not None]
-        processed_jobs = [p.get_processed_jobs() for p in processors_by_type if p is not None]
 
         if type in incomes_by_type: 
             incomes_by_type[type] += (incomes)
@@ -270,11 +265,6 @@ for i in range(1):
             reputations_by_type[type] += (reputations)
         else: 
             reputations_by_type[type] = reputations
-
-        if type in processed_jobs_by_type: 
-            processed_jobs_by_type[type] += (processed_jobs)
-        else: 
-            processed_jobs_by_type[type] = processed_jobs
 
     avg_prices = sum(model.market_place.rewards)/model.market_place.total_jobs_matched
 
@@ -292,16 +282,11 @@ fig = plt.figure(figsize = (7, 5))
 
 for i, type in enumerate(types): 
     incomes = incomes_by_type[type]
-    processed_jobs = processed_jobs_by_type[type]
     reputations = reputations_by_type[type]
 
 
 
     print('############### ' + type + ' ###############')
-    print('\n')
-    print('AVG Pr. JOBS ' + str(sum(processed_jobs)/len(processed_jobs)))
-    print('\n')
-
     print('MAX INC ' + str(max(incomes)))
     print('MIN INC ' + str(min(incomes)))
     print('AVG INC ' + str(sum(incomes)/len(incomes)))
@@ -314,7 +299,6 @@ for i, type in enumerate(types):
     print('STDev REP ' + str(statistics.stdev(reputations)))
     print('\n')
 
-# TODO JGD NEXT number of jobs allocated by type
 
 
     plt.scatter(incomes, reputations, c = colors[i], s=1)
